@@ -1,14 +1,9 @@
-import type { NextApiRequest, NextApiResponse } from 'next';
+import { NextApiRequest, NextApiResponse } from 'next';
 import { getAuth } from 'firebase-admin/auth';
-import { initializeApp } from 'firebase-admin/app';
+import initFirebaseAdmin from '../../../lib/firebaseAdmin';
+import { setRateLimit } from '../../../lib/rateLimit';
 
-initializeApp({
-  credential: {
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-  },
-});
+initFirebaseAdmin();
 
 interface AuthedRequest extends NextApiRequest {
   body: {
@@ -17,24 +12,36 @@ interface AuthedRequest extends NextApiRequest {
   };
 }
 
-export default async function handler(req: AuthedRequest, res: NextApiResponse) {
+const rateLimit = new Map<string, number>();
+
+export default async function signup(req: AuthedRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ message: 'Method not allowed' });
   }
 
-  const { email, password } = req.body;
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+
+  if (rateLimit.get(clientIp as string) >= 5) {
+    return res.status(429).json({ message: 'Too many requests, please try again later.' });
+  }
 
   try {
+    const { email, password } = req.body;
     if (!email || !password) {
       return res.status(400).json({ message: 'Email and password are required' });
     }
 
-    const userRecord = await getAuth().createUser({
+    const user = await getAuth().createUser({
       email,
       password,
     });
 
-    return res.status(201).json({ uid: userRecord.uid, message: 'User created successfully' });
+    rateLimit.set(clientIp as string, (rateLimit.get(clientIp as string) || 0) + 1);
+    setTimeout(() => {
+      rateLimit.set(clientIp as string, (rateLimit.get(clientIp as string) || 1) - 1);
+    }, 60000); // Reset after 1 minute
+
+    return res.status(201).json({ uid: user.uid });
   } catch (err) {
     return res.status(500).json({ message: err instanceof Error ? err.message : String(err) });
   }
