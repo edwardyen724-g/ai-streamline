@@ -1,22 +1,28 @@
-const path = require("path");
+const colors = require('tailwindcss/colors');
 
-/** @type {import('tailwindcss').Config} */
 module.exports = {
   content: [
-    path.join(__dirname, "src/**/*.{js,ts,jsx,tsx}"),
-    path.join(__dirname, "components/**/*.{js,ts,jsx,tsx}"),
-    path.join(__dirname, "app/**/*.{js,ts,jsx,tsx}"),
+    './src/app/**/*.{js,ts,jsx,tsx}',
+    './src/components/**/*.{js,ts,jsx,tsx}',
+    './src/pages/**/*.{js,ts,jsx,tsx}',
   ],
   theme: {
     extend: {
       colors: {
-        primary: "#3b82f6", // Tailwind blue
-        secondary: "#34d399", // Tailwind green
-        accent: "#fbbf24", // Tailwind yellow
+        primary: colors.blue[600],
+        secondary: colors.green[500],
+        accent: colors.purple[600],
+        neutral: colors.gray[800],
+        'base-100': colors.white,
+        'info': colors.blue[300],
+        'success': colors.green[300],
+        'warning': colors.yellow[300],
+        'error': colors.red[600],
       },
       fontFamily: {
-        sans: ["Inter", "sans-serif"],
-        serif: ["Merriweather", "serif"],
+        sans: ['Montserrat', 'ui-sans-serif', 'system-ui'],
+        serif: ['Merriweather', 'ui-serif', 'Georgia'],
+        mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
       },
     },
   },
