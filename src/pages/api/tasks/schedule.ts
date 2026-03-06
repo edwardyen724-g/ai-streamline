@@ -1,58 +1,68 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { getFirestore } from 'firebase-admin/firestore';
 import { initializeApp, applicationDefault, cert } from 'firebase-admin/app';
-import { rateLimit } from '../../../lib/rateLimit'; // adjust your path accordingly
-import { Task } from '../../../types'; // adjust your path accordingly
+import { getFirestore } from 'firebase-admin/firestore';
+import { Task } from '../../../lib/types'; // Assuming you have a Task type defined
+import { getAuth } from 'firebase-admin/auth';
 
-const adminApp = initializeApp({
-  credential: applicationDefault(),
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT!);
+initializeApp({
+  credential: cert(serviceAccount),
 });
 
 const db = getFirestore();
 
 interface AuthedRequest extends NextApiRequest {
-  user?: {
-    id: string;
-  };
+  user?: { uid: string };
 }
 
-const limiter = new Map<string, number>();
+const rateLimitMap = new Map<string, number>();
 
-export default async function handler(
-  req: AuthedRequest,
-  res: NextApiResponse
-) {
-  try {
-    if (req.method !== 'POST') {
-      return res.status(405).json({ message: 'Method Not Allowed' });
-    }
+const rateLimit = (key: string) => {
+  const now = Date.now();
+  const limit = 5; // requests
+  const windowMs = 60 * 1000; // 1 minute
 
-    const { title, cronTime, teamId }: Task = req.body;
-
-    if (!title || !cronTime || !teamId) {
-      return res.status(400).json({ message: 'Missing required fields' });
-    }
-
-    // Rate limiting
-    const key = req.user?.id || 'anonymous';
-    const currentTime = Date.now();
-    if (!limiter.has(key)) {
-      limiter.set(key, currentTime);
-    } else if (currentTime - (limiter.get(key) as number) < 1000) {
-      return res.status(429).json({ message: 'Too Many Requests' });
-    } else {
-      limiter.set(key, currentTime);
-    }
-
-    const taskRef = await db.collection('tasks').add({
-      title,
-      cronTime,
-      teamId,
-      createdAt: new Date(),
-    });
-
-    return res.status(201).json({ id: taskRef.id });
-  } catch (err) {
-    return res.status(500).json({ message: err instanceof Error ? err.message : String(err) });
+  if (!rateLimitMap.has(key)) {
+    rateLimitMap.set(key, now);
+    return true;
   }
-}
+
+  const firstRequestTime = rateLimitMap.get(key)!
+  if (now - firstRequestTime < windowMs) {
+    return false;
+  }
+  
+  rateLimitMap.set(key, now); // reset the time
+  return true;
+};
+
+const scheduleTask = async (data: Task) => {
+  const taskRef = db.collection('tasks').doc();
+  await taskRef.set(data);
+  return taskRef.id;
+};
+
+const handler = async (req: AuthedRequest, res: NextApiResponse) => {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  if (!req.user || !rateLimit(req.user.uid)) {
+    return res.status(429).json({ error: 'Too many requests' });
+  }
+
+  try {
+    const { title, schedule, userId } = req.body;
+
+    if (!title || !schedule || !userId) {
+      return res.status(400).json({ error: 'Missing title, schedule or userId' });
+    }
+
+    const taskId = await scheduleTask({ title, schedule, userId });
+    return res.status(201).json({ taskId });
+  } catch (err) {
+    return res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+};
+
+export default handler;
