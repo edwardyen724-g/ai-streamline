@@ -1,34 +1,14 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { getAuth } from 'firebase-admin/auth';
-import { initializeApp, cert } from 'firebase-admin/app';
-import rateLimit from 'express-rate-limit';
+import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
+import { firebaseApp } from '../../../lib/firebase'; // Ensure you have firebase initialized in this path
 
-const app = initializeApp({
-  credential: cert(JSON.parse(process.env.FIREBASE_ADMIN_CREDENTIALS || '{}')),
-});
+const auth = getAuth(firebaseApp);
 
 interface AuthedRequest extends NextApiRequest {
-  user?: { uid: string };
+  user?: { uid: string; email: string }; // Customize based on your user structure, if needed
 }
 
-const limiter = new Map<string, number>();
-
-const rateLimitMiddleware = (req: AuthedRequest, res: NextApiResponse, next: () => void) => {
-  const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress || '';
-  const currentTime = Date.now();
-  const timeLimit = 60000; // 1 minute
-  const requestCount = limiter.get(ip) || 0;
-
-  if (requestCount >= 5 && currentTime - (limiter.get(`${ip}-time`) || 0) < timeLimit) {
-    return res.status(429).json({ message: 'Too many requests. Please try again later.' });
-  }
-
-  limiter.set(ip, requestCount + 1);
-  limiter.set(`${ip}-time`, currentTime);
-  next();
-};
-
-const loginHandler = async (req: AuthedRequest, res: NextApiResponse) => {
+export default async function login(req: AuthedRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ message: 'Method not allowed' });
   }
@@ -36,15 +16,18 @@ const loginHandler = async (req: AuthedRequest, res: NextApiResponse) => {
   const { email, password } = req.body;
 
   try {
-    const userRecord = await getAuth().getUserByEmail(email);
-    // Additional logic for validating password would be necessary, typically handled by a client SDK
-    // Simulating successful login response for demonstration
-    res.status(200).json({ message: 'Login successful', uid: userRecord.uid });
-  } catch (err) {
-    res.status(401).json({ message: err instanceof Error ? err.message : String(err) });
-  }
-};
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Email and password are required' });
+    }
 
-export default (req: NextApiRequest, res: NextApiResponse) => {
-  rateLimitMiddleware(req as AuthedRequest, res, () => loginHandler(req as AuthedRequest, res));
-};
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+
+    // Optionally, you can attach user information to the request or session if needed
+    req.user = { uid: user.uid, email: user.email };
+
+    return res.status(200).json({ message: 'Login successful', user: { uid: user.uid, email: user.email } });
+  } catch (err) {
+    return res.status(401).json({ message: err instanceof Error ? err.message : String(err) });
+  }
+}
